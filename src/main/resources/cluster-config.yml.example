@@ -1,0 +1,6 @@
+cluster:
+  node_id:
+  node_role:
+  host:
+  port:
+  node_name:

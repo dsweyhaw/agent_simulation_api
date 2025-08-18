@@ -1,0 +1,96 @@
+spring:
+  config:
+    import: optional:file:.env[.properties]
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+  application:
+    name: ${SPRING_APPLICATION_NAME:ags-api}
+  threads:
+    virtual:
+      enabled: ${SPRING_THREADS_VIRTUAL_ENABLED:true}
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE}
+  jpa:
+    hibernate:
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
+    show-sql: ${SPRING_JPA_SHOW_SQL:false}
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        jdbc:
+          batch_size: ${SPRING_JPA_PROPERTIES_HIBERNATE_JDBC_BATCH_SIZE:1000}
+        order_inserts: ${SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_INSERTS:true}
+        order_updates: ${SPRING_JPA_PROPERTIES_HIBERNATE_ORDER_UPDATES:true}
+      format_sql: ${SPRING_JPA_PROPERTIES_FORMAT_SQL:true}
+  flyway:
+    enabled: ${SPRING_FLYWAY_ENABLED:true}
+    baseline-on-migrate: ${SPRING_FLYWAY_BASELINE_ON_MIGRATE:true}
+    locations: ${SPRING_FLYWAY_LOCATIONS:classpath:db/migration}
+    url: ${SPRING_FLYWAY_URL}
+    user: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD}
+      database: ${SPRING_DATA_REDIS_DATABASE:0}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+cluster:
+  config:
+    path: ${CLUSTER_CONFIG_PATH}
+
+webflux:
+  body:
+    max_size_mb: ${WEBFLUX_BODY_MAX_SIZE_MB:10}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+  endpoint:
+    metrics:
+      enabled: true
+
+app:
+  timezone: ${APP_TIMEZONE:UTC+7}
+
+logging:
+  level:
+    root: ${LOGGING_LEVEL_ROOT:INFO}
+    redis:
+      clients:
+        jedis: ${LOGGING_LEVEL_REDIS_CLIENTS_JEDIS:DEBUG}
+  file:
+    path: ${LOGGING_FILE_PATH:storage/logs}
+
+jwt:
+  secret: ${JWT_SECRET}
+  ttl: ${JWT_TTL:7776000000}
+  refresh_ttl: ${JWT_REFRESH_TTL:2419200000}
+
+gama:
+  path:
+    shell: ${GAMA_PATH_SHELL}
+    output: ${GAMA_PATH_OUTPUT}
+    xml: ${GAMA_PATH_XML}
+    project: ${GAMA_PATH_PROJECT}
+  config:
+    frame-rate: ${GAMA_CONFIG_FRAME_RATE:45}
+
+#aws:
+#  access-key: ${AWS_ACCESS_KEY}
+#  secret-key: ${AWS_SECRET_KEY}
+#  region: ${AWS_REGION}
+#  s3:
+#    bucket-name: ${AWS_S3_BUCKET_NAME}

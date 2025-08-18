@@ -1,0 +1,56 @@
+services:
+  api:
+    container_name: ags_dev_api
+    restart: always
+    build:
+      context: .
+      dockerfile: ./docker/development/api/Dockerfile
+    volumes:
+      - ./:/app
+      - ./projects:/app/projects
+      - ./gama/gama-platform:/opt/gama-platform
+    ports:
+      - "8080:8080"
+    networks:
+      - ags_network
+    depends_on:
+      - db
+      - redis
+
+  db:
+    container_name: ags_dev_db
+    restart: always
+    image: mysql:8.4
+    ports:
+      - "3306:3306"
+    networks:
+      - ags_network
+    environment:
+      MYSQL_ROOT_PASSWORD: mysql123456
+      MYSQL_DATABASE: ags
+      MYSQL_USER: agsuser
+      MYSQL_PASSWORD: mysql123456
+      TZ: Asia/Ho_Chi_Minh
+    volumes:
+      - ags_db_volume:/var/lib/mysql
+
+  redis:
+    container_name: ags_dev_redis
+    restart: always
+    image: redis:7.4
+    command: redis-server /usr/local/etc/redis/redis.conf
+    volumes:
+      - ags_redis_volume:/data/
+      - ./docker/development/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - ags_network
+
+networks:
+  ags_network:
+    driver: bridge
+
+volumes:
+  ags_db_volume:
+  ags_redis_volume:
