@@ -44,7 +44,7 @@ application-*.yml
 # cluster-config.yml
 
 # Project
-projects/*
+#projects/*
 !projects/README.md
 
 # Storage
