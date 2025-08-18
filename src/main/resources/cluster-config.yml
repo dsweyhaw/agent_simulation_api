@@ -1,6 +1,6 @@
 cluster:
   node_id: 1
   node_role: 1
-  host: 13.218.225.253
+  host: 13.223.194.29
   port: 8080
   node_name: master
