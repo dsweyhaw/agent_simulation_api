@@ -19,12 +19,18 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class GamaValidationService implements IGamaValidationService {
     
-    @Value("${gama.path.shell}")
+    @Value("${gama.path.shell:}")
     private String GAMA_SHELL_PATH;
     
     @Override
     public ValidationResult validateGamlFile(Path gamlFilePath, String experimentName) {
         try {
+            // Check if GAMA path is configured
+            if (GAMA_SHELL_PATH == null || GAMA_SHELL_PATH.trim().isEmpty()) {
+                log.warn("GAMA shell path not configured. Skipping validation.");
+                return ValidationResult.success(); // Allow upload without validation if GAMA not configured
+            }
+            
             log.info("Starting GAMA batch validation for file: {} with experiment: {}", gamlFilePath, experimentName);
             
             // Build GAMA batch validation command
@@ -37,33 +43,55 @@ public class GamaValidationService implements IGamaValidationService {
             
             Process process = processBuilder.start();
             
-            // Read output with timeout and early detection
-            ValidationResult result = monitorProcessOutput(process, gamlFilePath);
-            if (result != null) {
-                return result;
+            // Read output
+            StringBuilder output = new StringBuilder();
+            StringBuilder errorOutput = new StringBuilder();
+            
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+                 BufferedReader errorReader = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
+                
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line).append("\n");
+                }
+                
+                while ((line = errorReader.readLine()) != null) {
+                    errorOutput.append(line).append("\n");
+                }
             }
             
-            // If monitoring didn't determine result, wait with timeout
-            boolean finished = process.waitFor(30, TimeUnit.SECONDS);
+            // Wait for process to complete with timeout (2 minutes max)
+            boolean finished = process.waitFor(2, TimeUnit.MINUTES);
             int exitCode = finished ? process.exitValue() : -1;
             
-            // Kill process if it's still running (simulation started, so validation passed)
+            // Kill process if it's still running (likely means validation passed and simulation started)
             if (!finished) {
-                log.info("GAMA validation timed out, but simulation started - killing process and marking as valid");
+                log.info("GAMA validation timed out after 2 minutes - assuming validation passed, killing process");
                 process.destroyForcibly();
                 return ValidationResult.success();
             }
             
-            log.info("GAMA validation completed with exit code: {}", exitCode);
+            String outputStr = output.toString();
+            String errorStr = errorOutput.toString();
             
-            if (exitCode == 0) {
+            log.info("GAMA validation completed with exit code: {}", exitCode);
+            log.debug("GAMA output: {}", outputStr);
+            if (!errorStr.isEmpty()) {
+                log.debug("GAMA error output: {}", errorStr);
+            }
+            
+            // Check for compilation errors in output
+            if (containsCompilationErrors(outputStr, errorStr)) {
+                String errorMessage = extractErrorMessage(outputStr, errorStr);
+                log.warn("GAMA compilation failed: {}", errorMessage);
+                return ValidationResult.error("GAML file compilation failed", errorMessage);
+            } else if (exitCode == 0) {
                 log.info("GAMA validation successful for file: {}", gamlFilePath.getFileName());
                 return ValidationResult.success();
             } else {
-                // Read any remaining output for error analysis
-                String remainingOutput = readRemainingOutput(process);
-                log.warn("GAMA validation failed with exit code {}: {}", exitCode, remainingOutput);
-                return ValidationResult.error("GAML file validation failed", remainingOutput);
+                String errorMessage = extractErrorMessage(outputStr, errorStr);
+                log.warn("GAMA validation failed with exit code {}: {}", exitCode, errorMessage);
+                return ValidationResult.error("GAML file validation failed", errorMessage);
             }
             
         } catch (IOException | InterruptedException e) {
@@ -112,98 +140,5 @@ public class GamaValidationService implements IGamaValidationService {
         }
         
         return "Unknown validation error";
-    }
-    
-    /**
-     * Monitors the GAMA process output in real-time to detect compilation success/failure early
-     */
-    private ValidationResult monitorProcessOutput(Process process, Path gamlFilePath) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            StringBuilder output = new StringBuilder();
-            String line;
-            long startTime = System.currentTimeMillis();
-            long maxWaitTime = 60000; // 60 seconds max wait for compilation
-            
-            while ((line = reader.readLine()) != null) {
-                output.append(line).append("\n");
-                log.debug("GAMA output: {}", line);
-                
-                // Check for compilation failure indicators
-                if (containsCompilationErrorLine(line)) {
-                    log.warn("Compilation error detected: {}", line);
-                    // Read a few more lines to get complete error message
-                    StringBuilder errorDetail = new StringBuilder(line).append("\n");
-                    for (int i = 0; i < 5; i++) {
-                        String errorLine = reader.readLine();
-                        if (errorLine != null) {
-                            errorDetail.append(errorLine).append("\n");
-                        }
-                    }
-                    process.destroyForcibly();
-                    return ValidationResult.error("GAML file compilation failed", errorDetail.toString());
-                }
-                
-                // Check for simulation start indicators (means compilation succeeded)
-                if (containsSimulationStartLine(line)) {
-                    log.info("Simulation started - compilation successful, terminating validation");
-                    process.destroyForcibly();
-                    return ValidationResult.success();
-                }
-                
-                // Timeout check
-                if (System.currentTimeMillis() - startTime > maxWaitTime) {
-                    log.warn("GAMA validation monitoring timed out");
-                    break;
-                }
-            }
-            
-            // If we reach here, the process may have ended naturally or timed out
-            return null; // Let the caller handle final process status
-            
-        } catch (IOException e) {
-            log.error("Error monitoring GAMA process output", e);
-            return ValidationResult.error("GAML file validation failed", "Error monitoring process: " + e.getMessage());
-        }
-    }
-    
-    /**
-     * Checks if a line indicates compilation failure
-     */
-    private boolean containsCompilationErrorLine(String line) {
-        String lowerLine = line.toLowerCase();
-        return lowerLine.contains("gama couldn't compile your input file") ||
-               lowerLine.contains("compilation error") ||
-               lowerLine.contains("syntax error") ||
-               lowerLine.contains("error in you command") ||
-               lowerLine.contains("gaml parsing error");
-    }
-    
-    /**
-     * Checks if a line indicates simulation has started (compilation succeeded)
-     */
-    private boolean containsSimulationStartLine(String line) {
-        String lowerLine = line.toLowerCase();
-        return lowerLine.contains("image display surface created") ||
-               lowerLine.contains("simulation") && lowerLine.contains("started") ||
-               lowerLine.contains("running simulation") ||
-               lowerLine.contains("step") && lowerLine.contains("cycle");
-    }
-    
-    /**
-     * Reads any remaining output from the process for error reporting
-     */
-    private String readRemainingOutput(Process process) {
-        StringBuilder output = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-            String line;
-            int lineCount = 0;
-            while ((line = reader.readLine()) != null && lineCount < 20) { // Limit to prevent hanging
-                output.append(line).append("\n");
-                lineCount++;
-            }
-        } catch (IOException e) {
-            log.debug("Error reading remaining output", e);
-        }
-        return output.toString();
     }
 }

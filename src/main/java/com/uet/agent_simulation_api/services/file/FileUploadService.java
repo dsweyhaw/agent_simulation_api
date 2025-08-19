@@ -64,21 +64,19 @@ public class FileUploadService implements IFileUploadService {
             // Create directories if they don't exist
             Files.createDirectories(projectPath);
             
-            // Save file temporarily for validation
-            var tempFilePath = Files.createTempFile("gaml_validation_", ".gaml");
+            // Save file directly to project location for proper validation
+            saveFileToPath(request.getGamlFile(), targetFilePath);
+            log.info("GAML file saved to: {}", targetFilePath);
+            
             try {
-                saveFileToPath(request.getGamlFile(), tempFilePath);
-                
-                // Validate GAML file using batch execution
-                var validationResult = gamaValidationService.validateGamlFile(tempFilePath, request.getExperimentName());
+                // Validate GAML file from project location (required for proper GAMA context)
+                var validationResult = gamaValidationService.validateGamlFile(targetFilePath, request.getExperimentName());
                 if (!validationResult.isValid()) {
                     log.warn("GAML validation failed: {}", validationResult.message());
+                    // Delete invalid file
+                    Files.deleteIfExists(targetFilePath);
                     return UploadGamlResponse.error("GAML file is not right format: " + validationResult.message());
                 }
-                
-                // Move file to final location
-                Files.move(tempFilePath, targetFilePath, StandardCopyOption.REPLACE_EXISTING);
-                log.info("GAML file saved to: {}", targetFilePath);
                 
                 // Save model to database
                 var model = createModel(modelName, request.getProjectId(), userId);
@@ -95,9 +93,10 @@ public class FileUploadService implements IFileUploadService {
                 return UploadGamlResponse.success(savedModel.getId(), savedExperiment.getId(), 
                                                 modelName, request.getExperimentName());
                 
-            } finally {
-                // Clean up temp file
-                Files.deleteIfExists(tempFilePath);
+            } catch (Exception validationException) {
+                // If validation or database operations fail, clean up the uploaded file
+                Files.deleteIfExists(targetFilePath);
+                throw validationException;
             }
             
         } catch (ProjectNotFoundException e) {
