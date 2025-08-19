@@ -7,12 +7,13 @@ import java.nio.file.Path;
  */
 public interface IGamaValidationService {
     /**
-     * Validates a GAML file using GAMA headless validation
+     * Validates a GAML file using GAMA headless batch execution
      *
      * @param gamlFilePath Path to the GAML file to validate
+     * @param experimentName Name of the experiment to validate against
      * @return ValidationResult containing validation status and details
      */
-    ValidationResult validateGamlFile(Path gamlFilePath);
+    ValidationResult validateGamlFile(Path gamlFilePath, String experimentName);
     
     /**
      * Result of GAMA validation

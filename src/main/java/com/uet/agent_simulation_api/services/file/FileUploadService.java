@@ -69,8 +69,8 @@ public class FileUploadService implements IFileUploadService {
             try {
                 saveFileToPath(request.getGamlFile(), tempFilePath);
                 
-                // Validate GAML file
-                var validationResult = gamaValidationService.validateGamlFile(tempFilePath);
+                // Validate GAML file using batch execution
+                var validationResult = gamaValidationService.validateGamlFile(tempFilePath, request.getExperimentName());
                 if (!validationResult.isValid()) {
                     log.warn("GAML validation failed: {}", validationResult.message());
                     return UploadGamlResponse.error("GAML file is not right format: " + validationResult.message());
