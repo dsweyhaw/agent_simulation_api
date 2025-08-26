@@ -26,12 +26,6 @@ public class GamaValidationService implements IGamaValidationService {
         try {
             log.info("Starting GAMA validation for file: {}", gamlFilePath);
             
-            // Check if file exists
-            if (!Files.exists(gamlFilePath)) {
-                log.error("GAML file does not exist: {}", gamlFilePath);
-                return ValidationResult.error("GAML file not found", "File does not exist at path: " + gamlFilePath);
-            }
-            
             // Build GAMA validation command
             List<String> command = buildValidationCommand(gamlFilePath);
             

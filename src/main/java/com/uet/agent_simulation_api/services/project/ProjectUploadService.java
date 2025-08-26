@@ -1,0 +1,282 @@
+package com.uet.agent_simulation_api.services.project;
+
+import com.uet.agent_simulation_api.models.Model;
+import com.uet.agent_simulation_api.models.Project;
+import com.uet.agent_simulation_api.repositories.ModelRepository;
+import com.uet.agent_simulation_api.repositories.ProjectRepository;
+import com.uet.agent_simulation_api.requests.project.FinalizeProjectRequest;
+import com.uet.agent_simulation_api.requests.project.UploadProjectRequest;
+import com.uet.agent_simulation_api.responses.project.ProjectFinalizeResponse;
+import com.uet.agent_simulation_api.responses.project.ProjectUploadResponse;
+import com.uet.agent_simulation_api.services.auth.IAuthService;
+import com.uet.agent_simulation_api.services.validation.IGamaValidationService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.io.IOException;
+import java.math.BigInteger;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+/**
+ * Service for handling project upload operations
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ProjectUploadService implements IProjectUploadService {
+    
+    private final IAuthService authService;
+    private final IGamaValidationService gamaValidationService;
+    private final ProjectRepository projectRepository;
+    private final ModelRepository modelRepository;
+    
+    @Value("${gama.path.project}")
+    private String GAMA_PROJECT_ROOT_PATH;
+    
+    private static final String TEMP_DIR_PREFIX = "/tmp/project_upload_";
+    
+    @Override
+    public ProjectUploadResponse uploadProjectZip(UploadProjectRequest request) {
+        try {
+            log.info("Starting project ZIP upload: {}", request.getProjectName());
+            
+            // Create temporary directory
+            String tempDirId = UUID.randomUUID().toString();
+            Path tempDir = Paths.get(TEMP_DIR_PREFIX + tempDirId);
+            Files.createDirectories(tempDir);
+            
+            // Extract ZIP file
+            extractZipFile(request.getProjectZip().getInputStream(), tempDir);
+            log.info("ZIP file extracted to: {}", tempDir);
+            
+            // Find and validate GAML files
+            List<ProjectUploadResponse.GamlFileInfo> gamlFiles = findAndValidateGamlFiles(tempDir);
+            log.info("Found {} GAML files", gamlFiles.size());
+            
+            return ProjectUploadResponse.success(tempDirId, gamlFiles);
+            
+        } catch (IOException e) {
+            log.error("Error during project ZIP upload", e);
+            return ProjectUploadResponse.error("Failed to process ZIP file: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error during project upload", e);
+            return ProjectUploadResponse.error("Unexpected error occurred: " + e.getMessage());
+        }
+    }
+    
+    @Override
+    @Transactional(rollbackFor = {Exception.class, Throwable.class})
+    public ProjectFinalizeResponse finalizeProject(FinalizeProjectRequest request) {
+        try {
+            log.info("Finalizing project: {} with {} selected files", 
+                    request.getProjectName(), request.getSelectedGamlFiles().size());
+            
+            Path tempDir = Paths.get(TEMP_DIR_PREFIX + request.getTempDirId());
+            if (!Files.exists(tempDir)) {
+                return ProjectFinalizeResponse.error("Temporary directory not found");
+            }
+            
+            // Create project in database
+            var userId = authService.getCurrentUserId();
+            var projectLocation = "/" + sanitizeProjectName(request.getProjectName());
+            var project = createProject(request.getProjectName(), projectLocation, userId);
+            var savedProject = projectRepository.save(project);
+            
+            // Create final project directory
+            Path finalProjectDir = Paths.get(GAMA_PROJECT_ROOT_PATH, projectLocation);
+            Files.createDirectories(finalProjectDir);
+            
+            // Copy entire project structure (excluding unselected GAML files)
+            copyProjectStructure(tempDir, finalProjectDir, request.getSelectedGamlFiles());
+            
+            // Create models for selected GAML files
+            List<BigInteger> modelIds = createModelsForGamlFiles(
+                request.getSelectedGamlFiles(), savedProject.getId(), userId);
+            
+            // Clean up temporary directory
+            cleanupTempDirectory(request.getTempDirId());
+            
+            log.info("Project finalized successfully: ID={}, Models={}", 
+                    savedProject.getId(), modelIds.size());
+            
+            return ProjectFinalizeResponse.success(savedProject.getId(), request.getProjectName(), modelIds);
+            
+        } catch (IOException e) {
+            log.error("Error finalizing project", e);
+            return ProjectFinalizeResponse.error("Failed to finalize project: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Unexpected error finalizing project", e);
+            return ProjectFinalizeResponse.error("Unexpected error occurred: " + e.getMessage());
+        }
+    }
+    
+    @Override
+    public void cleanupTempDirectory(String tempDirId) {
+        try {
+            Path tempDir = Paths.get(TEMP_DIR_PREFIX + tempDirId);
+            if (Files.exists(tempDir)) {
+                deleteDirectoryRecursively(tempDir);
+                log.info("Cleaned up temporary directory: {}", tempDir);
+            }
+        } catch (IOException e) {
+            log.warn("Failed to cleanup temporary directory: {}", tempDirId, e);
+        }
+    }
+    
+    private void extractZipFile(java.io.InputStream zipInputStream, Path targetDir) throws IOException {
+        try (ZipInputStream zis = new ZipInputStream(zipInputStream)) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                Path entryPath = targetDir.resolve(entry.getName());
+                
+                // Security check: prevent zip slip
+                if (!entryPath.normalize().startsWith(targetDir.normalize())) {
+                    throw new IOException("Bad zip entry: " + entry.getName());
+                }
+                
+                if (entry.isDirectory()) {
+                    Files.createDirectories(entryPath);
+                } else {
+                    Files.createDirectories(entryPath.getParent());
+                    Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                }
+                zis.closeEntry();
+            }
+        }
+    }
+    
+    private List<ProjectUploadResponse.GamlFileInfo> findAndValidateGamlFiles(Path directory) throws IOException {
+        List<ProjectUploadResponse.GamlFileInfo> gamlFiles = new ArrayList<>();
+        
+        try (Stream<Path> paths = Files.walk(directory)) {
+            paths.filter(Files::isRegularFile)
+                 .filter(path -> path.toString().toLowerCase().endsWith(".gaml"))
+                 .forEach(path -> {
+                     try {
+                         String fileName = path.getFileName().toString();
+                         String relativePath = directory.relativize(path).toString();
+                         long fileSize = Files.size(path);
+                         
+                         // Validate GAML file
+                         var validationResult = gamaValidationService.validateGamlFile(path);
+                         
+                         if (validationResult.isValid()) {
+                             gamlFiles.add(ProjectUploadResponse.GamlFileInfo.valid(fileName, relativePath, fileSize));
+                         } else {
+                             gamlFiles.add(ProjectUploadResponse.GamlFileInfo.invalid(
+                                 fileName, relativePath, fileSize, validationResult.message()));
+                         }
+                     } catch (IOException e) {
+                         log.warn("Error processing GAML file: {}", path, e);
+                     }
+                 });
+        }
+        
+        return gamlFiles;
+    }
+    
+    private void copyProjectStructure(Path source, Path target, List<String> selectedGamlFiles) throws IOException {
+        Files.walkFileTree(source, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                Path targetDir = target.resolve(source.relativize(dir));
+                Files.createDirectories(targetDir);
+                return FileVisitResult.CONTINUE;
+            }
+            
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                String relativePath = source.relativize(file).toString();
+                
+                // If it's a GAML file, only copy if selected
+                if (file.toString().toLowerCase().endsWith(".gaml")) {
+                    if (selectedGamlFiles.contains(relativePath)) {
+                        Path targetFile = target.resolve(relativePath);
+                        Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } else {
+                    // Copy all non-GAML files (libraries, resources, etc.)
+                    Path targetFile = target.resolve(relativePath);
+                    Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+                
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+    
+    private List<BigInteger> createModelsForGamlFiles(List<String> gamlFiles, BigInteger projectId, BigInteger userId) {
+        List<BigInteger> modelIds = new ArrayList<>();
+        
+        for (String gamlFile : gamlFiles) {
+            String modelName = extractModelName(gamlFile);
+            var model = createModel(modelName, projectId, userId);
+            var savedModel = modelRepository.save(model);
+            modelIds.add(savedModel.getId());
+            log.debug("Created model: {} (ID: {})", modelName, savedModel.getId());
+        }
+        
+        return modelIds;
+    }
+    
+    private void deleteDirectoryRecursively(Path directory) throws IOException {
+        Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+            
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
+    
+    private String sanitizeProjectName(String projectName) {
+        return projectName.toLowerCase()
+                         .replaceAll("[^a-z0-9\\-_]", "-")
+                         .replaceAll("-+", "-")
+                         .trim();
+    }
+    
+    private String extractModelName(String gamlFilePath) {
+        Path path = Paths.get(gamlFilePath);
+        String fileName = path.getFileName().toString();
+        return fileName.toLowerCase().endsWith(".gaml") 
+            ? fileName.substring(0, fileName.length() - 5)
+            : fileName;
+    }
+    
+    private Project createProject(String projectName, String location, BigInteger userId) {
+        return Project.builder()
+                .name(projectName)
+                .location(location)
+                .userId(userId)
+                .createdBy(authService.getCurrentUser().getEmail())
+                .updatedBy(authService.getCurrentUser().getEmail())
+                .build();
+    }
+    
+    private Model createModel(String modelName, BigInteger projectId, BigInteger userId) {
+        return Model.builder()
+                .name(modelName)
+                .projectId(projectId)
+                .userId(userId)
+                .createdBy(authService.getCurrentUser().getEmail())
+                .updatedBy(authService.getCurrentUser().getEmail())
+                .build();
+    }
+}
