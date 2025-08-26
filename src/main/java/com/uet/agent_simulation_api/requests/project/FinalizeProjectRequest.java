@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Request DTO for finalizing project with selected GAML files
@@ -25,4 +26,7 @@ public class FinalizeProjectRequest {
     
     @NotEmpty(message = "At least one GAML file must be selected")
     private List<String> selectedGamlFiles;
+    
+    // Map of gaml file path -> experiment name (optional)
+    private Map<String, String> experimentNames;
 }

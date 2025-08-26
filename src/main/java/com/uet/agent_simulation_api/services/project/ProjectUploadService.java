@@ -1,7 +1,9 @@
 package com.uet.agent_simulation_api.services.project;
 
+import com.uet.agent_simulation_api.models.Experiment;
 import com.uet.agent_simulation_api.models.Model;
 import com.uet.agent_simulation_api.models.Project;
+import com.uet.agent_simulation_api.repositories.ExperimentRepository;
 import com.uet.agent_simulation_api.repositories.ModelRepository;
 import com.uet.agent_simulation_api.repositories.ProjectRepository;
 import com.uet.agent_simulation_api.requests.project.FinalizeProjectRequest;
@@ -39,6 +41,7 @@ public class ProjectUploadService implements IProjectUploadService {
     private final IGamaValidationService gamaValidationService;
     private final ProjectRepository projectRepository;
     private final ModelRepository modelRepository;
+    private final ExperimentRepository experimentRepository;
     
     @Value("${gama.path.project}")
     private String GAMA_PROJECT_ROOT_PATH;
@@ -59,11 +62,17 @@ public class ProjectUploadService implements IProjectUploadService {
             extractZipFile(request.getProjectZip().getInputStream(), tempDir);
             log.info("ZIP file extracted to: {}", tempDir);
             
+            // Detect project name from extracted structure
+            String detectedProjectName = detectProjectNameFromStructure(tempDir, request.getProjectName());
+            log.info("Detected project name: {}", detectedProjectName);
+            
             // Find and validate GAML files
             List<ProjectUploadResponse.GamlFileInfo> gamlFiles = findAndValidateGamlFiles(tempDir);
             log.info("Found {} GAML files", gamlFiles.size());
             
-            return ProjectUploadResponse.success(tempDirId, gamlFiles);
+            var response = ProjectUploadResponse.success(tempDirId, gamlFiles);
+            response.setDetectedProjectName(detectedProjectName);
+            return response;
             
         } catch (IOException e) {
             log.error("Error during project ZIP upload", e);
@@ -99,9 +108,9 @@ public class ProjectUploadService implements IProjectUploadService {
             // Copy entire project structure (excluding unselected GAML files)
             copyProjectStructure(tempDir, finalProjectDir, request.getSelectedGamlFiles());
             
-            // Create models for selected GAML files
-            List<BigInteger> modelIds = createModelsForGamlFiles(
-                request.getSelectedGamlFiles(), savedProject.getId(), userId);
+            // Create models and experiments for selected GAML files
+            List<BigInteger> modelIds = createModelsAndExperimentsForGamlFiles(
+                request.getSelectedGamlFiles(), request.getExperimentNames(), savedProject.getId(), userId);
             
             // Clean up temporary directory
             cleanupTempDirectory(request.getTempDirId());
@@ -137,19 +146,33 @@ public class ProjectUploadService implements IProjectUploadService {
         try (ZipInputStream zis = new ZipInputStream(zipInputStream)) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
+                // Skip invalid entries or __MACOSX folders
+                if (entry.getName().contains("__MACOSX") || entry.getName().startsWith("._")) {
+                    zis.closeEntry();
+                    continue;
+                }
+                
                 Path entryPath = targetDir.resolve(entry.getName());
                 
                 // Security check: prevent zip slip
                 if (!entryPath.normalize().startsWith(targetDir.normalize())) {
-                    throw new IOException("Bad zip entry: " + entry.getName());
+                    log.warn("Skipping bad zip entry: {}", entry.getName());
+                    zis.closeEntry();
+                    continue;
                 }
                 
-                if (entry.isDirectory()) {
-                    Files.createDirectories(entryPath);
-                } else {
-                    Files.createDirectories(entryPath.getParent());
-                    Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                try {
+                    if (entry.isDirectory()) {
+                        Files.createDirectories(entryPath);
+                    } else {
+                        Files.createDirectories(entryPath.getParent());
+                        Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                        log.debug("Extracted: {}", entryPath);
+                    }
+                } catch (IOException e) {
+                    log.warn("Failed to extract entry: {} - {}", entry.getName(), e.getMessage());
                 }
+                
                 zis.closeEntry();
             }
         }
@@ -215,7 +238,11 @@ public class ProjectUploadService implements IProjectUploadService {
         });
     }
     
-    private List<BigInteger> createModelsForGamlFiles(List<String> gamlFiles, BigInteger projectId, BigInteger userId) {
+    private List<BigInteger> createModelsAndExperimentsForGamlFiles(
+            List<String> gamlFiles, 
+            Map<String, String> experimentNames, 
+            BigInteger projectId, 
+            BigInteger userId) {
         List<BigInteger> modelIds = new ArrayList<>();
         
         for (String gamlFile : gamlFiles) {
@@ -224,6 +251,15 @@ public class ProjectUploadService implements IProjectUploadService {
             var savedModel = modelRepository.save(model);
             modelIds.add(savedModel.getId());
             log.debug("Created model: {} (ID: {})", modelName, savedModel.getId());
+            
+            // Create experiment if experiment name is provided
+            String experimentName = experimentNames != null ? experimentNames.get(gamlFile) : null;
+            if (experimentName != null && !experimentName.trim().isEmpty()) {
+                var experiment = createExperiment(experimentName.trim(), savedModel.getId(), projectId, userId);
+                var savedExperiment = experimentRepository.save(experiment);
+                log.debug("Created experiment: {} (ID: {}) for model: {}", 
+                    experimentName, savedExperiment.getId(), modelName);
+            }
         }
         
         return modelIds;
@@ -243,6 +279,30 @@ public class ProjectUploadService implements IProjectUploadService {
                 return FileVisitResult.CONTINUE;
             }
         });
+    }
+    
+    private String detectProjectNameFromStructure(Path tempDir, String fallbackName) throws IOException {
+        // Look for the main project directory (should contain both 'includes' and 'models' folders)
+        try (Stream<Path> paths = Files.list(tempDir)) {
+            var projectDirs = paths
+                .filter(Files::isDirectory)
+                .filter(dir -> {
+                    try {
+                        return Files.exists(dir.resolve("models")) || Files.exists(dir.resolve("includes"));
+                    } catch (Exception e) {
+                        return false;
+                    }
+                })
+                .toList();
+            
+            if (!projectDirs.isEmpty()) {
+                // Use the first directory that contains models or includes
+                return projectDirs.get(0).getFileName().toString();
+            }
+        }
+        
+        // If no clear project structure, use fallback name
+        return sanitizeProjectName(fallbackName);
     }
     
     private String sanitizeProjectName(String projectName) {
@@ -273,6 +333,17 @@ public class ProjectUploadService implements IProjectUploadService {
     private Model createModel(String modelName, BigInteger projectId, BigInteger userId) {
         return Model.builder()
                 .name(modelName)
+                .projectId(projectId)
+                .userId(userId)
+                .createdBy(authService.getCurrentUser().getEmail())
+                .updatedBy(authService.getCurrentUser().getEmail())
+                .build();
+    }
+    
+    private Experiment createExperiment(String experimentName, BigInteger modelId, BigInteger projectId, BigInteger userId) {
+        return Experiment.builder()
+                .name(experimentName)
+                .modelId(modelId)
                 .projectId(projectId)
                 .userId(userId)
                 .createdBy(authService.getCurrentUser().getEmail())
