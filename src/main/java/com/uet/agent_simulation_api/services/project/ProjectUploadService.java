@@ -94,6 +94,19 @@ public class ProjectUploadService implements IProjectUploadService {
                 return ProjectFinalizeResponse.error("Temporary directory not found");
             }
             
+            // Validate selected GAML files
+            for (String gamlFile : request.getSelectedGamlFiles()) {
+                Path gamlPath = tempDir.resolve(gamlFile);
+                if (Files.exists(gamlPath)) {
+                    var validationResult = gamaValidationService.validateGamlFile(gamlPath);
+                    if (!validationResult.isValid()) {
+                        return ProjectFinalizeResponse.error(
+                            "GAML file '" + gamlFile + "' is invalid: " + validationResult.message());
+                    }
+                }
+            }
+            log.info("All selected GAML files validated successfully");
+            
             // Create project in database
             var userId = authService.getCurrentUserId();
             var projectLocation = "/" + sanitizeProjectName(request.getProjectName());
@@ -203,15 +216,10 @@ public class ProjectUploadService implements IProjectUploadService {
                          String relativePath = directory.relativize(path).toString();
                          long fileSize = Files.size(path);
                          
-                         // Validate GAML file
-                         var validationResult = gamaValidationService.validateGamlFile(path);
+                         // Skip validation during upload - just list all GAML files as valid
+                         // Validation will happen later during finalization for selected files only
+                         gamlFiles.add(ProjectUploadResponse.GamlFileInfo.valid(fileName, relativePath, fileSize));
                          
-                         if (validationResult.isValid()) {
-                             gamlFiles.add(ProjectUploadResponse.GamlFileInfo.valid(fileName, relativePath, fileSize));
-                         } else {
-                             gamlFiles.add(ProjectUploadResponse.GamlFileInfo.invalid(
-                                 fileName, relativePath, fileSize, validationResult.message()));
-                         }
                      } catch (IOException e) {
                          log.warn("Error processing GAML file: {}", path, e);
                      }
