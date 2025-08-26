@@ -10,7 +10,6 @@ import java.io.InputStreamReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Service for validating GAML files using GAMA headless
@@ -31,11 +30,14 @@ public class GamaValidationService implements IGamaValidationService {
                 return ValidationResult.success(); // Allow upload without validation if GAMA not configured
             }
             
-            log.info("Starting GAMA batch validation for file: {} with experiment: {}", gamlFilePath, experimentName);
-            
-            // Build GAMA batch validation command
-            List<String> command = buildBatchValidationCommand(gamlFilePath, experimentName);
-            log.info("Executing GAMA command: {}", String.join(" ", command));
+            // Check if file exists
+            if (!Files.exists(gamlFilePath)) {
+                log.error("GAML file does not exist: {}", gamlFilePath);
+                return ValidationResult.error("GAML file not found", "File does not exist at path: " + gamlFilePath);
+            }
+
+            // Build GAMA validation command
+            List<String> command = buildValidationCommand(gamlFilePath);
             
             // Execute validation command
             ProcessBuilder processBuilder = new ProcessBuilder(command);
@@ -63,7 +65,7 @@ public class GamaValidationService implements IGamaValidationService {
             // Wait for process to complete with timeout (2 minutes max)
             boolean finished = process.waitFor(2, TimeUnit.MINUTES);
             int exitCode = finished ? process.exitValue() : -1;
-            
+
             // Kill process if it's still running (likely means validation passed and simulation started)
             if (!finished) {
                 log.info("GAMA validation timed out after 2 minutes - assuming validation passed, killing process");
@@ -79,7 +81,7 @@ public class GamaValidationService implements IGamaValidationService {
             if (!errorStr.isEmpty()) {
                 log.debug("GAMA error output: {}", errorStr);
             }
-            
+
             // Check for compilation errors in output
             if (containsCompilationErrors(outputStr, errorStr)) {
                 String errorMessage = extractErrorMessage(outputStr, errorStr);
@@ -103,17 +105,18 @@ public class GamaValidationService implements IGamaValidationService {
     private List<String> buildBatchValidationCommand(Path gamlFilePath, String experimentName) {
         List<String> command = new ArrayList<>();
         command.add(GAMA_SHELL_PATH);
-        command.add("-batch");
-        command.add(experimentName);
+        command.add("-validate");
         command.add(gamlFilePath.toString());
+
+        log.info("GAMA validation command: {}", String.join(" ", command));
         return command;
     }
     
-    private boolean containsCompilationErrors(String output, String errorOutput) {
+    private boolean containsValidationErrors(String output, String errorOutput) {
         String combinedOutput = (output + "\n" + errorOutput).toLowerCase();
-        // Check for specific GAMA compilation error indicators
-        return combinedOutput.contains("gama couldn't compile your input file") ||
-               combinedOutput.contains("compilation error") ||
+        return combinedOutput.contains("error") || 
+               combinedOutput.contains("exception") || 
+               combinedOutput.contains("failed") ||
                combinedOutput.contains("syntax error") ||
                combinedOutput.contains("error in you command") ||
                combinedOutput.contains("gaml parsing error") ||
