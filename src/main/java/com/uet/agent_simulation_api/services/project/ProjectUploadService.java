@@ -27,8 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Stream;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
 
 /**
  * Service for handling project upload operations
@@ -144,37 +142,51 @@ public class ProjectUploadService implements IProjectUploadService {
     }
     
     private void extractZipFile(java.io.InputStream zipInputStream, Path targetDir) throws IOException {
-        try (ZipInputStream zis = new ZipInputStream(zipInputStream)) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                // Skip invalid entries or __MACOSX folders
-                if (entry.getName().contains("__MACOSX") || entry.getName().startsWith("._")) {
-                    zis.closeEntry();
-                    continue;
-                }
-                
-                Path entryPath = targetDir.resolve(entry.getName());
-                
-                // Security check: prevent zip slip
-                if (!entryPath.normalize().startsWith(targetDir.normalize())) {
-                    log.warn("Skipping bad zip entry: {}", entry.getName());
-                    zis.closeEntry();
-                    continue;
-                }
-                
-                try {
-                    if (entry.isDirectory()) {
-                        Files.createDirectories(entryPath);
-                    } else {
-                        Files.createDirectories(entryPath.getParent());
-                        Files.copy(zis, entryPath, StandardCopyOption.REPLACE_EXISTING);
-                        log.debug("Extracted: {}", entryPath);
+        // Read all bytes into memory first to work around ZipInputStream EXT descriptor issue
+        byte[] zipData = zipInputStream.readAllBytes();
+        
+        // Create temporary file to use with ZipFile
+        Path tempZipFile = Files.createTempFile("upload", ".zip");
+        try {
+            Files.write(tempZipFile, zipData);
+            
+            // Use ZipFile instead of ZipInputStream to handle EXT descriptors properly
+            try (java.util.zip.ZipFile zipFile = new java.util.zip.ZipFile(tempZipFile.toFile())) {
+                zipFile.stream().forEach(entry -> {
+                    try {
+                        // Skip invalid entries or __MACOSX folders
+                        if (entry.getName().contains("__MACOSX") || entry.getName().startsWith("._")) {
+                            return;
+                        }
+                        
+                        Path entryPath = targetDir.resolve(entry.getName());
+                        
+                        // Security check: prevent zip slip
+                        if (!entryPath.normalize().startsWith(targetDir.normalize())) {
+                            log.warn("Skipping bad zip entry: {}", entry.getName());
+                            return;
+                        }
+                        
+                        if (entry.isDirectory()) {
+                            Files.createDirectories(entryPath);
+                        } else {
+                            Files.createDirectories(entryPath.getParent());
+                            try (java.io.InputStream entryInputStream = zipFile.getInputStream(entry)) {
+                                Files.copy(entryInputStream, entryPath, StandardCopyOption.REPLACE_EXISTING);
+                            }
+                            log.debug("Extracted: {}", entryPath);
+                        }
+                    } catch (IOException e) {
+                        log.warn("Failed to extract entry: {} - {}", entry.getName(), e.getMessage());
                     }
-                } catch (IOException e) {
-                    log.warn("Failed to extract entry: {} - {}", entry.getName(), e.getMessage());
-                }
-                
-                zis.closeEntry();
+                });
+            }
+        } finally {
+            // Clean up temporary ZIP file
+            try {
+                Files.deleteIfExists(tempZipFile);
+            } catch (IOException e) {
+                log.warn("Failed to delete temporary ZIP file: {}", tempZipFile, e);
             }
         }
     }
