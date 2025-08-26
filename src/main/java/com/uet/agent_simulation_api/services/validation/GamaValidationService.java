@@ -18,24 +18,20 @@ import java.util.List;
 @Slf4j
 public class GamaValidationService implements IGamaValidationService {
     
-    @Value("${gama.path.shell:}")
+    @Value("${gama.path.shell}")
     private String GAMA_SHELL_PATH;
     
     @Override
-    public ValidationResult validateGamlFile(Path gamlFilePath, String experimentName) {
+    public ValidationResult validateGamlFile(Path gamlFilePath) {
         try {
-            // Check if GAMA path is configured
-            if (GAMA_SHELL_PATH == null || GAMA_SHELL_PATH.trim().isEmpty()) {
-                log.warn("GAMA shell path not configured. Skipping validation.");
-                return ValidationResult.success(); // Allow upload without validation if GAMA not configured
-            }
+            log.info("Starting GAMA validation for file: {}", gamlFilePath);
             
             // Check if file exists
             if (!Files.exists(gamlFilePath)) {
                 log.error("GAML file does not exist: {}", gamlFilePath);
                 return ValidationResult.error("GAML file not found", "File does not exist at path: " + gamlFilePath);
             }
-
+            
             // Build GAMA validation command
             List<String> command = buildValidationCommand(gamlFilePath);
             
@@ -62,37 +58,19 @@ public class GamaValidationService implements IGamaValidationService {
                 }
             }
             
-            // Wait for process to complete with timeout (2 minutes max)
-            boolean finished = process.waitFor(2, TimeUnit.MINUTES);
-            int exitCode = finished ? process.exitValue() : -1;
-
-            // Kill process if it's still running (likely means validation passed and simulation started)
-            if (!finished) {
-                log.info("GAMA validation timed out after 2 minutes - assuming validation passed, killing process");
-                process.destroyForcibly();
-                return ValidationResult.success();
-            }
+            // Wait for process to complete
+            int exitCode = process.waitFor();
             
             String outputStr = output.toString();
             String errorStr = errorOutput.toString();
             
             log.info("GAMA validation completed with exit code: {}", exitCode);
             log.debug("GAMA output: {}", outputStr);
-            if (!errorStr.isEmpty()) {
-                log.debug("GAMA error output: {}", errorStr);
-            }
-
-            // Check for compilation errors in output
-            if (containsCompilationErrors(outputStr, errorStr)) {
-                String errorMessage = extractErrorMessage(outputStr, errorStr);
-                log.warn("GAMA compilation failed: {}", errorMessage);
-                return ValidationResult.error("GAML file compilation failed", errorMessage);
-            } else if (exitCode == 0) {
-                log.info("GAMA validation successful for file: {}", gamlFilePath.getFileName());
+            
+            if (exitCode == 0 && !containsValidationErrors(outputStr, errorStr)) {
                 return ValidationResult.success();
             } else {
                 String errorMessage = extractErrorMessage(outputStr, errorStr);
-                log.warn("GAMA validation failed with exit code {}: {}", exitCode, errorMessage);
                 return ValidationResult.error("GAML file validation failed", errorMessage);
             }
             
@@ -102,12 +80,12 @@ public class GamaValidationService implements IGamaValidationService {
         }
     }
     
-    private List<String> buildBatchValidationCommand(Path gamlFilePath, String experimentName) {
+    private List<String> buildValidationCommand(Path gamlFilePath) {
         List<String> command = new ArrayList<>();
         command.add(GAMA_SHELL_PATH);
         command.add("-validate");
         command.add(gamlFilePath.toString());
-
+        
         log.info("GAMA validation command: {}", String.join(" ", command));
         return command;
     }
@@ -118,9 +96,7 @@ public class GamaValidationService implements IGamaValidationService {
                combinedOutput.contains("exception") || 
                combinedOutput.contains("failed") ||
                combinedOutput.contains("syntax error") ||
-               combinedOutput.contains("error in you command") ||
-               combinedOutput.contains("gaml parsing error") ||
-               combinedOutput.contains("exception");
+               combinedOutput.contains("compilation error");
     }
     
     private String extractErrorMessage(String output, String errorOutput) {

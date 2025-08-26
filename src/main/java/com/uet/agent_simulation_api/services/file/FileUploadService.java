@@ -64,40 +64,33 @@ public class FileUploadService implements IFileUploadService {
             // Create directories if they don't exist
             Files.createDirectories(projectPath);
             
-            // Save file directly to project location for proper validation
+            // Save file directly to final location first
             saveFileToPath(request.getGamlFile(), targetFilePath);
             log.info("GAML file saved to: {}", targetFilePath);
-
-            try {
-                // Validate GAML file from project location (required for proper GAMA context)
-                var validationResult = gamaValidationService.validateGamlFile(targetFilePath, request.getExperimentName());
-                if (!validationResult.isValid()) {
-                    log.warn("GAML validation failed: {}", validationResult.message());
-                    // Delete invalid file
-                    Files.deleteIfExists(targetFilePath);
-                    return UploadGamlResponse.error("GAML file is not right format: " + validationResult.message());
-                }
-
-                // Save model to database
-                var model = createModel(modelName, request.getProjectId(), userId);
-                var savedModel = modelRepository.save(model);
-
-                // Save experiment to database
-                var experiment = createExperiment(request.getExperimentName(), savedModel.getId(),
-                                                request.getProjectId(), userId);
-                var savedExperiment = experimentRepository.save(experiment);
-
-                log.info("Successfully created model (ID: {}) and experiment (ID: {})",
-                        savedModel.getId(), savedExperiment.getId());
-
-                return UploadGamlResponse.success(savedModel.getId(), savedExperiment.getId(),
-                                                modelName, request.getExperimentName());
-
-            } catch (Exception validationException) {
-                // If validation or database operations fail, clean up the uploaded file
+            
+            // Validate GAML file from final location
+            var validationResult = gamaValidationService.validateGamlFile(targetFilePath);
+            if (!validationResult.isValid()) {
+                // Remove invalid file
                 Files.deleteIfExists(targetFilePath);
-                throw validationException;
+                log.warn("GAML validation failed, file removed: {}", validationResult.message());
+                return UploadGamlResponse.error("GAML file is not right format: " + validationResult.message());
             }
+            
+            // Save model to database
+            var model = createModel(modelName, request.getProjectId(), userId);
+            var savedModel = modelRepository.save(model);
+            
+            // Save experiment to database
+            var experiment = createExperiment(request.getExperimentName(), savedModel.getId(), 
+                                            request.getProjectId(), userId);
+            var savedExperiment = experimentRepository.save(experiment);
+            
+            log.info("Successfully created model (ID: {}) and experiment (ID: {})", 
+                    savedModel.getId(), savedExperiment.getId());
+            
+            return UploadGamlResponse.success(savedModel.getId(), savedExperiment.getId(), 
+                                            modelName, request.getExperimentName());
             
         } catch (ProjectNotFoundException e) {
             log.error("Project not found: {}", request.getProjectId(), e);
