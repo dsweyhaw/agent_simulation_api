@@ -15,6 +15,7 @@ import com.uet.agent_simulation_api.responses.auth.RefreshResponse;
 import com.uet.agent_simulation_api.responses.auth.RegisterResponse;
 import com.uet.agent_simulation_api.utils.JwtUtil;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -25,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigInteger;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService implements IAuthService {
@@ -102,6 +104,8 @@ public class AuthService implements IAuthService {
 
     @Override
     public AppUser getCurrentUser() {
-        return (AppUser) SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        // For development - always return user ID 1
+        return userRepository.findById(BigInteger.valueOf(1))
+                .orElseThrow(() -> new UnauthorizedException("Default user not found"));
     }
 }

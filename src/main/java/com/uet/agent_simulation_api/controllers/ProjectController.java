@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import java.math.BigInteger;
 
 @RestController
 @RequestMapping("/api/v1/projects")
@@ -76,5 +77,16 @@ public class ProjectController {
     public ResponseEntity<SuccessResponse> cleanupTempDirectory(@PathVariable String tempDirId) {
         projectUploadService.cleanupTempDirectory(tempDirId);
         return responseHandler.respondSuccess("Temporary directory cleaned up successfully");
+    }
+    
+    @DeleteMapping("/{projectId}")
+    public ResponseEntity<SuccessResponse> deleteProject(@PathVariable BigInteger projectId) {
+        boolean deleted = projectService.deleteProject(projectId);
+        
+        if (deleted) {
+            return responseHandler.respondSuccess("Project deleted successfully");
+        } else {
+            return ResponseEntity.notFound().build();
+        }
     }
 }

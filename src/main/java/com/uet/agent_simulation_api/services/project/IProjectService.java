@@ -21,4 +21,13 @@ public interface IProjectService {
      * @return Optional<Project>
      */
     Optional<Project> getProject(BigInteger id);
+    
+    /**
+     * This method is used to delete a project by id.
+     * This will also delete the project folder from the file system.
+     *
+     * @param projectId Project id to delete
+     * @return boolean - true if deletion was successful, false otherwise
+     */
+    boolean deleteProject(BigInteger projectId);
 }

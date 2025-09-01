@@ -50,35 +50,13 @@ public class SecurityConfig {
                                 .authenticationEntryPoint(appAuthenticationEntrypoint)
                 )
                 .authorizeHttpRequests((requests) -> requests
-                        // Because of frontend doesn't implement authentication feature, we need to permit all requests
-                        .requestMatchers(HttpMethod.GET, "/api/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/**").permitAll()
-                        .requestMatchers(HttpMethod.PUT, "/api/**").permitAll()
-                        .requestMatchers(HttpMethod.DELETE, "/api/**").permitAll()
-
-                        .requestMatchers(HttpMethod.GET, "/actuator/**").permitAll()
-
-                        // Auth endpoints - public
-//                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
-//                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
-//                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh").permitAll()
-//
-//                        // Health check
-//                        .requestMatchers(HttpMethod.GET, "/api/v1/health").permitAll()
-//
-//                         .requestMatchers(HttpMethod.GET, "/api/v1/experiment_result_images/multi_experiment_animation/**").permitAll()
-//
-//                        .requestMatchers(HttpMethod.GET, "/api/v1/experiment_results/{id}/download").permitAll()
-//
-//                        .requestMatchers(HttpMethod.GET, "/api/v1/metrics/**").permitAll()
-//
-//                        .requestMatchers(HttpMethod.GET, "/actuator/**").permitAll()
-
-                        .anyRequest().authenticated()
+                        // Disable authentication - permit all requests
+                        .anyRequest().permitAll()
                 )
                 .sessionManagement(sess -> sess.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
 
-        http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+        // Disable JWT filter for development
+        // http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

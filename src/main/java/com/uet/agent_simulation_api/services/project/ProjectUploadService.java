@@ -107,10 +107,12 @@ public class ProjectUploadService implements IProjectUploadService {
             }
             log.info("All selected GAML files validated successfully");
             
-            // Create project in database
+            // Create project in database with unique name handling
             var userId = authService.getCurrentUserId();
-            var projectLocation = "/" + sanitizeProjectName(request.getProjectName());
-            var project = createProject(request.getProjectName(), projectLocation, userId);
+            log.info("Using user ID for project creation: {}", userId);
+            var uniqueProjectName = generateUniqueProjectName(request.getProjectName(), userId);
+            var projectLocation = "/" + sanitizeProjectName(uniqueProjectName);
+            var project = createProject(uniqueProjectName, projectLocation, userId);
             var savedProject = projectRepository.save(project);
             
             // Create final project directory
@@ -230,28 +232,90 @@ public class ProjectUploadService implements IProjectUploadService {
     }
     
     private void copyProjectStructure(Path source, Path target, List<String> selectedGamlFiles) throws IOException {
-        Files.walkFileTree(source, new SimpleFileVisitor<Path>() {
+        log.info("Copying project structure from {} to {}", source, target);
+        
+        // First, find the actual project content directory
+        Path projectContentDir = findProjectContentDirectory(source);
+        log.info("Detected project content directory: {}", projectContentDir);
+        
+        if (projectContentDir != null) {
+            // Copy from the project content directory, flattening the structure
+            copyProjectContent(projectContentDir, target, selectedGamlFiles, source);
+        } else {
+            // Fallback: copy directly from source (in case structure is already flat)
+            copyProjectContent(source, target, selectedGamlFiles, source);
+        }
+    }
+    
+    private Path findProjectContentDirectory(Path tempDir) throws IOException {
+        // Look for a subdirectory that contains 'models' and/or 'includes' folders
+        try (Stream<Path> paths = Files.list(tempDir)) {
+            var projectDirs = paths
+                .filter(Files::isDirectory)
+                .filter(dir -> {
+                    try {
+                        return Files.exists(dir.resolve("models")) || Files.exists(dir.resolve("includes"));
+                    } catch (Exception e) {
+                        return false;
+                    }
+                })
+                .toList();
+            
+            if (!projectDirs.isEmpty()) {
+                return projectDirs.get(0); // Return the first directory with project structure
+            }
+        }
+        
+        // Check if tempDir itself has the project structure (models/ and includes/ at root level)
+        if (Files.exists(tempDir.resolve("models")) || Files.exists(tempDir.resolve("includes"))) {
+            return tempDir;
+        }
+        
+        return null;
+    }
+    
+    private void copyProjectContent(Path contentDir, Path target, List<String> selectedGamlFiles, Path originalSource) throws IOException {
+        Files.walkFileTree(contentDir, new SimpleFileVisitor<Path>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                Path targetDir = target.resolve(source.relativize(dir));
+                // Calculate relative path from the content directory (not original source)
+                Path relativePath = contentDir.relativize(dir);
+                Path targetDir = target.resolve(relativePath);
                 Files.createDirectories(targetDir);
                 return FileVisitResult.CONTINUE;
             }
             
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                String relativePath = source.relativize(file).toString();
+                // Calculate relative path from the content directory
+                Path relativePath = contentDir.relativize(file);
+                String relativePathStr = relativePath.toString();
                 
-                // If it's a GAML file, only copy if selected
+                // For GAML files, need to check against the original selectedGamlFiles list
+                // which might have the nested path structure
                 if (file.toString().toLowerCase().endsWith(".gaml")) {
-                    if (selectedGamlFiles.contains(relativePath)) {
+                    boolean shouldCopy = false;
+                    
+                    // Check if this file matches any of the selected GAML files
+                    String fileName = file.getFileName().toString();
+                    for (String selectedFile : selectedGamlFiles) {
+                        if (selectedFile.endsWith(fileName) || selectedFile.equals(relativePathStr) || 
+                            originalSource.relativize(file).toString().equals(selectedFile)) {
+                            shouldCopy = true;
+                            break;
+                        }
+                    }
+                    
+                    if (shouldCopy) {
                         Path targetFile = target.resolve(relativePath);
                         Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                        log.debug("Copied GAML file: {} -> {}", file, targetFile);
                     }
                 } else {
                     // Copy all non-GAML files (libraries, resources, etc.)
                     Path targetFile = target.resolve(relativePath);
                     Files.copy(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                    log.debug("Copied resource file: {} -> {}", file, targetFile);
                 }
                 
                 return FileVisitResult.CONTINUE;
@@ -268,10 +332,11 @@ public class ProjectUploadService implements IProjectUploadService {
         
         for (String gamlFile : gamlFiles) {
             String modelName = extractModelName(gamlFile);
-            var model = createModel(modelName, projectId, userId);
+            String uniqueModelName = generateUniqueModelName(modelName, projectId, userId);
+            var model = createModel(uniqueModelName, projectId, userId);
             var savedModel = modelRepository.save(model);
             modelIds.add(savedModel.getId());
-            log.debug("Created model: {} (ID: {})", modelName, savedModel.getId());
+            log.debug("Created model: {} (ID: {})", uniqueModelName, savedModel.getId());
             
             // Create experiment if experiment name is provided
             String experimentName = experimentNames != null ? experimentNames.get(gamlFile) : null;
@@ -279,7 +344,7 @@ public class ProjectUploadService implements IProjectUploadService {
                 var experiment = createExperiment(experimentName.trim(), savedModel.getId(), projectId, userId);
                 var savedExperiment = experimentRepository.save(experiment);
                 log.debug("Created experiment: {} (ID: {}) for model: {}", 
-                    experimentName, savedExperiment.getId(), modelName);
+                    experimentName, savedExperiment.getId(), uniqueModelName);
             }
         }
         
@@ -333,6 +398,36 @@ public class ProjectUploadService implements IProjectUploadService {
                          .trim();
     }
     
+    /**
+     * Generate a unique project name by checking existing projects and adding suffix if needed
+     * @param requestedName The originally requested project name
+     * @param userId The user ID who is creating the project
+     * @return A unique project name (e.g., "Tsunami", "Tsunami-1", "Tsunami-2", etc.)
+     */
+    private String generateUniqueProjectName(String requestedName, BigInteger userId) {
+        String baseName = requestedName.trim();
+        String uniqueName = baseName;
+        int counter = 1;
+        
+        // Check if the name already exists for this user
+        while (projectRepository.existsByNameAndUserId(uniqueName, userId)) {
+            uniqueName = baseName + "-" + counter;
+            counter++;
+            
+            // Safety check to prevent infinite loop (max 1000 duplicates)
+            if (counter > 1000) {
+                uniqueName = baseName + "-" + System.currentTimeMillis();
+                break;
+            }
+        }
+        
+        if (!uniqueName.equals(baseName)) {
+            log.info("Project name '{}' already exists, using unique name: '{}'", baseName, uniqueName);
+        }
+        
+        return uniqueName;
+    }
+    
     private String extractModelName(String gamlFilePath) {
         Path path = Paths.get(gamlFilePath);
         String fileName = path.getFileName().toString();
@@ -346,8 +441,8 @@ public class ProjectUploadService implements IProjectUploadService {
                 .name(projectName)
                 .location(location)
                 .userId(userId)
-                .createdBy(authService.getCurrentUser().getEmail())
-                .updatedBy(authService.getCurrentUser().getEmail())
+                .createdBy("admin@uet.vn")  // Hardcoded for development
+                .updatedBy("admin@uet.vn")  // Hardcoded for development
                 .build();
     }
     
@@ -356,8 +451,8 @@ public class ProjectUploadService implements IProjectUploadService {
                 .name(modelName)
                 .projectId(projectId)
                 .userId(userId)
-                .createdBy(authService.getCurrentUser().getEmail())
-                .updatedBy(authService.getCurrentUser().getEmail())
+                .createdBy("admin@uet.vn")  // Hardcoded for development
+                .updatedBy("admin@uet.vn")  // Hardcoded for development
                 .build();
     }
     
@@ -367,8 +462,40 @@ public class ProjectUploadService implements IProjectUploadService {
                 .modelId(modelId)
                 .projectId(projectId)
                 .userId(userId)
-                .createdBy(authService.getCurrentUser().getEmail())
-                .updatedBy(authService.getCurrentUser().getEmail())
+                .createdBy("admin@uet.vn")  // Hardcoded for development
+                .updatedBy("admin@uet.vn")  // Hardcoded for development
                 .build();
+    }
+    
+    /**
+     * Generate a unique model name by checking existing models in the project and adding suffix if needed
+     * @param requestedName The originally requested model name
+     * @param projectId The project ID where the model will be created
+     * @param userId The user ID who is creating the model
+     * @return A unique model name (e.g., "my-model", "my-model-1", "my-model-2", etc.)
+     */
+    private String generateUniqueModelName(String requestedName, BigInteger projectId, BigInteger userId) {
+        String baseName = requestedName.trim();
+        String uniqueName = baseName;
+        int counter = 1;
+        
+        // Check if the name already exists in this project for this user
+        while (modelRepository.existsByNameAndProjectIdAndUserId(uniqueName, projectId, userId)) {
+            uniqueName = baseName + "-" + counter;
+            counter++;
+            
+            // Safety check to prevent infinite loop (max 1000 duplicates)
+            if (counter > 1000) {
+                uniqueName = baseName + "-" + System.currentTimeMillis();
+                break;
+            }
+        }
+        
+        if (!uniqueName.equals(baseName)) {
+            log.info("Model name '{}' already exists in project {}, using unique name: '{}'", 
+                    baseName, projectId, uniqueName);
+        }
+        
+        return uniqueName;
     }
 }

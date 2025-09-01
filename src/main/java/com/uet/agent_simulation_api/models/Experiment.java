@@ -34,27 +34,27 @@ public class Experiment extends Auditable {
     @Column(nullable = false)
     private String name;
 
-    @Column(name = "model_id", insertable = false, updatable = false, columnDefinition = "BIGINT")
+    @Column(name = "model_id", columnDefinition = "BIGINT")
     private BigInteger modelId;
 
-    @Column(name = "project_id", nullable = false, insertable = false, updatable = false, columnDefinition = "BIGINT")
+    @Column(name = "project_id", nullable = false, columnDefinition = "BIGINT")
     private BigInteger projectId;
 
-    @Column(name = "user_id", nullable = false, insertable = false, updatable = false, columnDefinition = "BIGINT")
+    @Column(name = "user_id", nullable = false, columnDefinition = "BIGINT")
     private BigInteger userId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "model_id", referencedColumnName = "id")
+    @JoinColumn(name = "model_id", insertable = false, updatable = false)
     @JsonIgnore
     private Model model;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "project_id", referencedColumnName = "id")
+    @JoinColumn(name = "project_id", insertable = false, updatable = false)
     @JsonIgnore
     private Project project;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", referencedColumnName = "id")
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
     @JsonIgnore
     private AppUser user;
 }

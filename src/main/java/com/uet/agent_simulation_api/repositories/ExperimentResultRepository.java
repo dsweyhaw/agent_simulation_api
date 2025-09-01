@@ -137,6 +137,48 @@ public interface ExperimentResultRepository extends JpaRepository<ExperimentResu
     @Query("DELETE FROM ExperimentResult er WHERE er.simulationRunId = :simulation_run_id")
     void deleteBySimulationRunId(@Param("simulation_run_id") BigInteger simulationRunId);
 
+    /**
+     * Delete all experiment results by model ID and user ID (for security)
+     * This will delete experiment results when a model is deleted
+     * @param modelId The model ID
+     * @param userId The user ID (for security check)
+     * @return number of deleted records
+     */
+    @Transactional
+    @Modifying
+    @Query("""
+        DELETE FROM ExperimentResult er
+        WHERE er.experimentId IN (
+            SELECT e.id FROM Experiment e 
+            WHERE e.modelId = :model_id AND e.userId = :user_id
+        )
+    """)
+    int deleteAllByModelIdAndUserId(
+        @Param("model_id") BigInteger modelId, 
+        @Param("user_id") BigInteger userId
+    );
+    
+    /**
+     * Delete all experiment results by project ID and user ID (for security)
+     * This will delete experiment results when a project is deleted
+     * @param projectId The project ID
+     * @param userId The user ID (for security check)
+     * @return number of deleted records
+     */
+    @Transactional
+    @Modifying
+    @Query("""
+        DELETE FROM ExperimentResult er
+        WHERE er.experimentId IN (
+            SELECT e.id FROM Experiment e 
+            WHERE e.projectId = :project_id AND e.userId = :user_id
+        )
+    """)
+    int deleteAllByProjectIdAndUserId(
+        @Param("project_id") BigInteger projectId, 
+        @Param("user_id") BigInteger userId
+    );
+
     @Transactional
     @Modifying
     @Query("DELETE FROM ExperimentResult er WHERE er.id IN :ids")

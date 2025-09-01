@@ -37,11 +37,11 @@ public class Project extends Auditable {
     @Column(nullable = false)
     private String location;
 
-    @Column(name = "user_id", nullable = false, insertable = false, updatable = false, columnDefinition = "BIGINT")
+    @Column(name = "user_id", nullable = false, columnDefinition = "BIGINT")
     private BigInteger userId;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", referencedColumnName = "id")
+    @JoinColumn(name = "user_id", insertable = false, updatable = false)
     @JsonIgnore
     private AppUser user;
 }

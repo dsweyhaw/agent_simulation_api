@@ -23,7 +23,10 @@ public class UploadGamlResponse {
     private boolean success;
     
     public static UploadGamlResponse success(BigInteger modelId, BigInteger experimentId, String modelName, String experimentName) {
-        return new UploadGamlResponse(modelId, experimentId, modelName, experimentName, "GAML file uploaded and validated successfully", true);
+        String message = experimentId != null 
+            ? "GAML file uploaded and validated successfully. Model and experiment created."
+            : "GAML file uploaded and validated successfully. Model created (no experiment).";
+        return new UploadGamlResponse(modelId, experimentId, modelName, experimentName, message, true);
     }
     
     public static UploadGamlResponse error(String message) {

@@ -20,4 +20,14 @@ public interface IModelService {
      * @return Model
      */
     Model getModel(BigInteger modelId);
+    
+    /**
+     * This method is used to delete a model by id.
+     * This will also delete the model file from the file system.
+     *
+     * @param modelId Model id to delete
+     * @param projectId Project id that the model belongs to
+     * @return boolean - true if deletion was successful, false otherwise
+     */
+    boolean deleteModel(BigInteger modelId, BigInteger projectId);
 }

@@ -21,7 +21,7 @@ public class UploadGamlRequest {
     @NotNull(message = "Project ID is required")
     private BigInteger projectId;
     
-    @NotBlank(message = "Experiment name is required")
+    // Optional: Only create experiment if experiment name is provided
     private String experimentName;
     
     @NotNull(message = "GAML file is required")
