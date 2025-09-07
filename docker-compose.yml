@@ -10,7 +10,7 @@ services:
       - ./src:/app/src
       - ./storage:/app/storage
       - .env:/app/.env
-      - ./projects:/app/projects
+      - projects_volume:/app/projects
       - ./gama/gama-platform:/opt/gama-platform
     ports:
       - "8080:8080"
@@ -57,5 +57,11 @@ networks:
     driver: bridge
 
 volumes:
+  projects_volume:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: addr=${EFS_ID},nfsvers=4.1
+      device: ":/projects"
   ags_db_volume:
   ags_redis_volume:
