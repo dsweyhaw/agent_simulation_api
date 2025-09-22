@@ -46,13 +46,13 @@ global {
     
     // Population counts and sizes
     int locals_number <- 200;
-    float locals_size <- 4.0;
+    float locals_size <- 12.0;
     
     int tourists_number <- 100;
-    float tourists_size <- 4.0;
+    float tourists_size <- 12.0;
     
     int rescuers_number <- 20;
-    float rescuers_size <- 4.0;
+    float rescuers_size <- 12.0;
     
     // Status counts for each population
     int locals_safe <- 0;

@@ -145,6 +145,17 @@ public class SimulationService implements ISimulationService {
 
         final var projectLocation = GAMA_PROJECT_ROOT_PATH + project.getLocation();
         final var gamaParams = request.getGamaParams();
+        
+        // LOG: Debug gamaParams in SimulationService
+        log.info("=== SIMULATION SERVICE DEBUG ===");
+        log.info("ProjectId: {}, Experiments count: {}", request.getProjectId(), request.getExperiments().size());
+        log.info("GamaParams received: {}", gamaParams);
+        if (gamaParams != null && !gamaParams.isEmpty()) {
+            log.info("GamaParams details:");
+            gamaParams.forEach((key, value) -> log.info("  {} = {}", key, value));
+        } else {
+            log.warn("GamaParams is null or empty!");
+        }
 
         request.getExperiments().forEach(experimentReq -> {
             final var experimentResultNumber = experimentReq.getExperimentResultNumber();
@@ -166,8 +177,11 @@ public class SimulationService implements ISimulationService {
             // Create experiment plan XML file.
             final var createXmlCommand = gamaCommandBuilder.createXmlFile(
                     experimentName,  projectLocation + "/models/" + gamlFile, pathToExperimentPlanXmlFile);
+            // Execute legacy command.
 
-            // Build command to run experiment.
+            //// Build command to run experiment with enhanced quality settings.
+            //final var runLegacyCommand = gamaCommandBuilder.buildLegacyWithQuality(Map.of("-hpc", "1"), pathToExperimentPlanXmlFile, pathToLocalExperimentOutputDir);
+            // Build command to run experiment (standard legacy mode).
             final var runLegacyCommand = gamaCommandBuilder.buildLegacy(Map.of("-hpc", "1"), pathToExperimentPlanXmlFile, pathToLocalExperimentOutputDir);
 
             // Execute legacy command.

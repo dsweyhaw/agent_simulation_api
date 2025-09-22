@@ -120,6 +120,24 @@ public class SimulationController {
 
     @PostMapping("/cluster")
     public ResponseEntity<SuccessResponse> runSimulationCluster(@Valid @RequestBody CreateClusterSimulationRequest request) {
+        // LOG: Debug received parameters
+        log.info("=== BACKEND RECEIVED CLUSTER REQUEST ===");
+        log.info("Number of simulation requests: {}", request.getSimulationRequests().size());
+        
+        for (int i = 0; i < request.getSimulationRequests().size(); i++) {
+            CreateSimulationRequest simReq = request.getSimulationRequests().get(i);
+            log.info("Simulation Request [{}]:", i);
+            log.info("  - ProjectId: {}, NodeId: {}, Order: {}", simReq.getProjectId(), simReq.getNodeId(), simReq.getOrder());
+            log.info("  - Experiments count: {}", simReq.getExperiments() != null ? simReq.getExperiments().size() : 0);
+            log.info("  - GamaParams: {}", simReq.getGamaParams());
+            if (simReq.getGamaParams() != null && !simReq.getGamaParams().isEmpty()) {
+                simReq.getGamaParams().forEach((key, value) -> 
+                    log.info("    {} = {}", key, value));
+            } else {
+                log.warn("    GamaParams is null or empty!");
+            }
+        }
+        
         request = experimentResultService.generateRequestNumber(request);
 
         // Prepare for run simulation in cluster
@@ -356,5 +374,34 @@ public class SimulationController {
         }
 
         return new CreateClusterSimulationRequest(simulationRequests);
+    }
+
+    /**
+     * Get available parameters for a GAML experiment
+     *
+     * @param projectId BigInteger
+     * @param modelId BigInteger  
+     * @param experimentId BigInteger
+     * @return ResponseEntity<SuccessResponse>
+     */
+    @GetMapping("/experiments/{experimentId}/parameters")
+    public ResponseEntity<SuccessResponse> getExperimentParameters(
+            @RequestParam("project_id") BigInteger projectId,
+            @RequestParam("model_id") BigInteger modelId,
+            @PathVariable BigInteger experimentId) {
+        
+        // Return the standard tsunami parameters
+        Map<String, Object> parameters = Map.of(
+            "locals_number", Map.of("type", "int", "min", 0, "max", 10000, "default", 200, "description", "Number of locals"),
+            "tourists_number", Map.of("type", "int", "min", 0, "max", 5000, "default", 100, "description", "Number of tourists"),
+            "rescuers_number", Map.of("type", "int", "min", 0, "max", 1000, "default", 20, "description", "Number of rescuers"),
+            "tourist_strategy", Map.of("type", "string", "options", List.of("wandering", "following rescuers or locals", "following crowd"), "default", "following rescuers or locals", "description", "Tourist Movement Strategy"),
+            "car_strategy", Map.of("type", "string", "options", List.of("always go ahead", "go out when congestion"), "default", "always go ahead", "description", "Car Movement Strategy"),
+            "tsunami_nb_segments", Map.of("type", "int", "min", 1, "max", 50, "default", 30, "description", "Tsunami segments"),
+            "tsunami_approach_time", Map.of("type", "int", "min", 0, "max", 1000, "default", 460, "description", "Tsunami approach time"),
+            "tsunami_speed_avg", Map.of("type", "float", "min", 10.0, "max", 100.0, "default", 44.3, "description", "Average tsunami speed")
+        );
+        
+        return responseHandler.respondSuccess(parameters);
     }
 }

@@ -8,4 +8,6 @@ public interface ISimulationStatisticService {
         String pigpenIds,
         String pigIds
     );
+    
+    Object getTsunamiStatisticsFromXml(String experimentResultIds);
 }

@@ -92,6 +92,11 @@ gama:
     project: ${GAMA_PATH_PROJECT}
   config:
     frame-rate: ${GAMA_CONFIG_FRAME_RATE:45}
+    # Enhanced rendering quality settings
+    quality:
+      high-quality-mode: ${GAMA_CONFIG_QUALITY_HIGH_QUALITY_MODE:true}
+      memory-allocation: ${GAMA_CONFIG_QUALITY_MEMORY_ALLOCATION:4g}
+      rendering-engine: ${GAMA_CONFIG_QUALITY_RENDERING_ENGINE:opengl}
 
 #aws:
 #  access-key: ${AWS_ACCESS_KEY}

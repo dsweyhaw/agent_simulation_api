@@ -30,12 +30,32 @@ public class SimulationStatisticController {
             @RequestParam(name = "pigpen_ids", required = false) String pigpenIds,
             @RequestParam(name = "pig_ids", required = false) String pigIds
     ) {
+        log.info("📊 Getting statistics for experiment result IDs: {}", experimentResultIds);
+        
         final var result = simulationStatisticService.getSimulationStatistic(
                 experimentResultIds,
                 pigpenIds,
                 pigIds
         );
 
+        log.info("📈 Statistics result: {}", result != null ? "Found data" : "No data");
+        return responseHandler.respondSuccess(result);
+    }
+    
+    /**
+     * Get Tsunami simulation statistics from XML files.
+     *
+     * @return ResponseEntity<SuccessResponse>
+     */
+    @GetMapping("/tsunami")
+    public ResponseEntity<SuccessResponse> getTsunamiStatistics(
+            @RequestParam(name = "experiment_result_ids") String experimentResultIds
+    ) {
+        log.info("🌊 Getting Tsunami statistics for experiment result IDs: {}", experimentResultIds);
+        
+        final var result = simulationStatisticService.getTsunamiStatisticsFromXml(experimentResultIds);
+
+        log.info("🌊 Tsunami statistics result: {}", result != null ? "Found data" : "No data");
         return responseHandler.respondSuccess(result);
     }
 }

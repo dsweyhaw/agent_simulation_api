@@ -1,3 +1,4 @@
+# DEV ENVIRONMENT
 services:
   api:
     container_name: ags_dev_api
@@ -6,7 +7,9 @@ services:
       context: .
       dockerfile: ./docker/development/api/Dockerfile
     volumes:
-      - ./:/app
+      - ./src:/app/src
+      - ./storage:/app/storage
+      - .env:/app/.env
       - ./projects:/app/projects
       - ./gama/gama-platform:/opt/gama-platform
     ports:
@@ -18,6 +21,8 @@ services:
       - redis
 
   db:
+    env_file:
+      - .env
     container_name: ags_dev_db
     restart: always
     image: mysql:8.4
@@ -26,10 +31,10 @@ services:
     networks:
       - ags_network
     environment:
-      MYSQL_ROOT_PASSWORD: mysql123456
+      MYSQL_ROOT_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       MYSQL_DATABASE: ags
-      MYSQL_USER: agsuser
-      MYSQL_PASSWORD: mysql123456
+      MYSQL_USER: ${SPRING_DATASOURCE_USERNAME}
+      MYSQL_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       TZ: Asia/Ho_Chi_Minh
     volumes:
       - ags_db_volume:/var/lib/mysql

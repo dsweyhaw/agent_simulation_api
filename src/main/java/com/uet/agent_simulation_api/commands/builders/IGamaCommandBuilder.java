@@ -24,6 +24,16 @@ public interface IGamaCommandBuilder extends ICommandBuilder {
     String buildLegacy(Map<String, String> options, String pathToXmlFile, String pathToOutputDir);
 
     /**
+     * This method is used to build gama headless legacy command with enhanced quality settings.
+     *
+     * @param options Map<String, String>
+     * @param pathToXmlFile String
+     * @param pathToOutputDir String
+     * @return String
+     */
+    String buildLegacyWithQuality(Map<String, String> options, String pathToXmlFile, String pathToOutputDir);
+
+    /**
      * This method is used to build gama headless batch command.
      *
      * @param options Map<String, String>
