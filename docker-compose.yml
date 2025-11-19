@@ -19,7 +19,13 @@ services:
     depends_on:
       - db
       - redis
-
+    # CloudWatch Logs configuration (requires instance profile with logs permissions).
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:-us-east-1}
+        awslogs-group: ${AWS_LOG_GROUP:-hainn-gama-simulation-master-log-groups}
+        awslogs-stream: ${INSTANCE_ID:-asg_master}
   db:
     env_file:
       - .env
