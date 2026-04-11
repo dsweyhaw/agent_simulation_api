@@ -138,15 +138,17 @@ public class AgentSimulationApiApplication implements CommandLineRunner {
 	 * Initialize the node.
 	 */
 	private void initNode() {
+		final var nodeId = Integer.parseInt(fileUtil.getValueByKey(clusterConfigPath, "node_id"));
+		final var nodeRole = Integer.parseInt(fileUtil.getValueByKey(clusterConfigPath, "node_role"));
 		final var host = fileUtil.getValueByKey(clusterConfigPath, "host");
 		final var port = fileUtil.getValueByKey(clusterConfigPath, "port");
 		final var nodeName = fileUtil.getValueByKey(clusterConfigPath, "node_name");
-		final var node = nodeRepository.findById(1);
+		final var node = nodeRepository.findById(nodeId);
 
 		if (node.isEmpty()) {
 			nodeRepository.save(Node.builder()
 				.name(nodeName)
-				.role(1)
+				.role(nodeRole)
 				.host(host)
 				.port(Integer.parseInt(port))
 				.createdBy("system")
@@ -157,7 +159,7 @@ public class AgentSimulationApiApplication implements CommandLineRunner {
 		}
 
 		node.get().setName(nodeName);
-		node.get().setRole(1);
+		node.get().setRole(nodeRole);
 		node.get().setHost(host);
 		node.get().setPort(Integer.parseInt(port));
 		node.get().setCreatedBy("system");
